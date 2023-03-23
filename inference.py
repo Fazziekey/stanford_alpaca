@@ -1,68 +1,88 @@
-# Copyright (c) Meta Platforms, Inc. and affiliates.
-# This software may be used and distributed according to the terms of the GNU General Public License version 3.
+# Adapted from https://github.com/tloen/alpaca-lora/blob/main/generate.py
 
 import torch
-import fire
-import time
-
-
-from pathlib import Path
-
 from transformers import AutoTokenizer, LlamaForCausalLM, GenerationConfig
 
-MODEL_PATH = "output"
-# MODEL_PATH = "/data/scratch/LLaMa-7B/"
-def main(path: str=MODEL_PATH):
+MODEL_PATH = "./ckpts/alpaca-7B"
+tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
+model = LlamaForCausalLM.from_pretrained(
+    MODEL_PATH,
+    torch_dtype=torch.float16,
+    device_map="auto",
+)
+model.eval()
 
 
+def generate_prompt(instruction, input=None):
+    if input:
+        return f"""Below is an instruction that describes a task, paired with an input that provides further context. Write a response that appropriately completes the request.
 
-    model = LlamaForCausalLM.from_pretrained(
-        path,
-        torch_dtype=torch.float16,
-        device_map="auto",
-    )
-    tokenizer = AutoTokenizer.from_pretrained(path)
+### Instruction:
+{instruction}
 
-    # prompt = "Tell me five words that rhyme with 'shock'."
-    # prompt = "Write a program that prints the numbers from 1 to 100. But for multiples of three print 'Fizz' instead of the number and for the multiples of five print 'Buzz'. For numbers which are multiples of both three and five print 'FizzBuzz'."
-    # prompt = "Write a Python program that prints the first 10 Fibonacci numbers."
-    # prompt = "Write a Python program that calculate Fibonacci numbers."
-    # prompt = "List all Canadian provinces in alphabetical order"
-    # prompt = "Tell me about the president of Mexico in 2019."
-    prompt = "How to play support in legends of league"
+### Input:
+{input}
 
+### Response:"""
+    else:
+        return f"""Below is an instruction that describes a task. Write a response that appropriately completes the request.
+
+### Instruction:
+{instruction}
+
+### Response:"""
+
+
+def evaluate(
+    instruction,
+    input=None,
+    temperature=0.1,
+    top_p=0.75,
+    top_k=40,
+    num_beams=4,
+    max_new_tokens=128,
+    **kwargs,
+):
+    prompt = generate_prompt(instruction, input)
     inputs = tokenizer(prompt, return_tensors="pt")
-    input_ids = inputs["input_ids"].to('cuda')
-
-    # Generate config
-
+    input_ids = inputs["input_ids"].cuda()
     generation_config = GenerationConfig(
-        temperature=0.1,
-        top_p=0.75,
-        top_k=40,
-        num_beams=4,
+        temperature=temperature,
+        top_p=top_p,
+        top_k=top_k,
+        num_beams=num_beams,
+        **kwargs,
     )
-    # Generate
-    start_time = time.time()
     with torch.no_grad():
-        generate_ids = model.generate(input_ids, 
-                generation_config=generation_config,
-                return_dict_in_generate=True,
-                output_scores=True,
-                max_new_tokens=512,
+        generation_output = model.generate(
+            input_ids=input_ids,
+            generation_config=generation_config,
+            return_dict_in_generate=True,
+            output_scores=True,
+            max_new_tokens=max_new_tokens,
         )
-
-    for s in generate_ids.sequences:
-    # s = generate_ids.sequences[0]
-        result = tokenizer.decode(s)
-        print("---------------------------")
-        print("### Response:\n")
-        print(result)
-        print("---------------------------\n")
-    
-    print(f"Generated in {time.time() - start_time:.2f} seconds")
+    s = generation_output.sequences[0]
+    output = tokenizer.decode(s)
+    return output.split("### Response:")[1].strip()
 
 
+instructions = [
+    "Tell me about alpacas.",
+    "Tell me about the president of Mexico in 2019.",
+    "Tell me about the king of France in 2019.",
+    "List all Canadian provinces in alphabetical order.",
+    "Write a Python program that prints the first 10 Fibonacci numbers.",
+    "Write a program that prints the numbers from 1 to 100. But for multiples of three print 'Fizz' instead of the number and for the multiples of five print 'Buzz'. For numbers which are multiples of both three and five print 'FizzBuzz'.",
+    "Tell me five words that rhyme with 'shock'.",
+    "Translate the sentence 'I have no mouth but I must scream' into Spanish.",
+    "Count up from 1 to 500.",
+    # ===
+    "How to play support in legends of league",
+    "Write a Python program that calculate Fibonacci numbers.",
+]
 
 if __name__ == "__main__":
-    fire.Fire(main)
+    for instruction in instructions:
+        print("Instruction:", instruction)
+        print("Response:", evaluate(instruction))
+        print()
