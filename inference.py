@@ -3,14 +3,18 @@
 import torch
 from transformers import AutoTokenizer, LlamaForCausalLM, GenerationConfig
 
+LOAD_8BIT = False  # 16G if False else 10G
 MODEL_PATH = "./ckpts/alpaca-7B"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_PATH)
 model = LlamaForCausalLM.from_pretrained(
     MODEL_PATH,
+    load_in_8bit=LOAD_8BIT,
     torch_dtype=torch.float16,
     device_map="auto",
 )
 model.eval()
+if not LOAD_8BIT:
+    model.half()  # seems to fix bugs for some users.
 
 
 def generate_prompt(instruction, input=None):
