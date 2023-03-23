@@ -24,6 +24,12 @@ from transformers import Trainer
 
 import utils
 
+from colossalai.nn.optimizer.gemini_optimizer import HybridAdam
+from colossalai.nn.parallel.utils import get_static_torch_model
+from colossalai.utils import get_current_device
+from colossalai.nn.parallel import GeminiDDP
+from colossalai.utils.model.colo_init_context import ColoInitContext
+
 IGNORE_INDEX = -100
 DEFAULT_PAD_TOKEN = "[PAD]"
 DEFAULT_EOS_TOKEN = "</s>"
@@ -192,12 +198,22 @@ def make_supervised_data_module(tokenizer: transformers.PreTrainedTokenizer, dat
 def train():
     parser = transformers.HfArgumentParser((ModelArguments, DataArguments, TrainingArguments))
     model_args, data_args, training_args = parser.parse_args_into_dataclasses()
-    print("model_args",model_args)
-    model = transformers.AutoModelForCausalLM.from_pretrained(
-        model_args.model_name_or_path,
-        cache_dir=training_args.cache_dir,
-    )
 
+    print("model_args",model_args)
+
+    with ColoInitContext(device=get_current_device()):
+        model = transformers.AutoModelForCausalLM.from_pretrained(
+            model_args.model_name_or_path,
+            cache_dir=training_args.cache_dir,
+        )
+
+    model = GeminiDDP(model,
+                    device=get_current_device(),
+                    placement_policy="auto",
+                    pin_memory=True,
+                    search_range_mb=64)
+    
+    optimizer = HybridAdam(model.parameters())
     tokenizer = transformers.AutoTokenizer.from_pretrained(
         model_args.model_name_or_path,
         cache_dir=training_args.cache_dir,
@@ -211,6 +227,7 @@ def train():
             tokenizer=tokenizer,
             model=model,
         )
+
     if "llama" in model_args.model_name_or_path:
         tokenizer.add_special_tokens(
             {
@@ -221,10 +238,13 @@ def train():
         )
 
     data_module = make_supervised_data_module(tokenizer=tokenizer, data_args=data_args)
-    trainer = Trainer(model=model, tokenizer=tokenizer, args=training_args, **data_module)
+    trainer = Trainer(model=model, tokenizer=tokenizer,optimizers=optimizer, args=training_args, **data_module)
     trainer.train()
     trainer.save_state()
     safe_save_model_for_hf_trainer(trainer=trainer, output_dir=training_args.output_dir)
+
+
+    
 
 
 if __name__ == "__main__":
