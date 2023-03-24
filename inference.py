@@ -37,6 +37,7 @@ def generate_prompt(instruction, input=None):
 ### Response:"""
 
 
+@torch.no_grad()
 def evaluate(
     instruction,
     input=None,
@@ -57,14 +58,14 @@ def evaluate(
         num_beams=num_beams,
         **kwargs,
     )
-    with torch.no_grad():
-        generation_output = model.generate(
-            input_ids=input_ids,
-            generation_config=generation_config,
-            return_dict_in_generate=True,
-            output_scores=True,
-            max_new_tokens=max_new_tokens,
-        )
+    generation_output = model.generate(
+        input_ids=input_ids,
+        generation_config=generation_config,
+        return_dict_in_generate=True,
+        output_scores=True,
+        max_new_tokens=max_new_tokens,
+        do_sample=True,
+    )
     s = generation_output.sequences[0]
     output = tokenizer.decode(s)
     return output.split("### Response:")[1].strip()
@@ -84,9 +85,10 @@ instructions = [
     "How to play support in legends of league",
     "Write a Python program that calculate Fibonacci numbers.",
 ]
+inst = [instructions[0]] * 4
 
 if __name__ == "__main__":
     for instruction in instructions:
         print("Instruction:", instruction)
-        print("Response:", evaluate(instruction))
+        print("Response:", evaluate(instruction, temparature=0.2, num_beams=1))
         print()
